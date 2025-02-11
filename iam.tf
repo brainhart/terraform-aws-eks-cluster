@@ -9,7 +9,7 @@ data "aws_iam_policy_document" "assume_role" {
 
   statement {
     effect  = "Allow"
-    actions = ["sts:AssumeRole"]
+    actions = ["sts:AssumeRole", "sts:TagSession"] # NOTE: auto mode requires TagSession (https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html)
 
     principals {
       type        = "Service"
@@ -38,6 +38,35 @@ resource "aws_iam_role_policy_attachment" "amazon_eks_service_policy" {
   count = local.create_eks_service_role ? 1 : 0
 
   policy_arn = format("arn:%s:iam::aws:policy/AmazonEKSServicePolicy", one(data.aws_partition.current[*].partition))
+  role       = one(aws_iam_role.default[*].name)
+}
+
+resource "aws_iam_role_policy_attachment" "amazon_eks_compute_policy" {
+  count = local.create_eks_service_role && local.auto_mode_enabled ? 1 : 0
+
+  policy_arn = format("arn:%s:iam::aws:policy/AmazonEKSComputePolicy", one(data.aws_partition.current[*].partition))
+  role       = one(aws_iam_role.default[*].name)
+}
+
+resource "aws_iam_role_policy_attachment" "amazon_eks_block_storage_policy" {
+  count = local.create_eks_service_role && local.auto_mode_enabled ? 1 : 0
+
+  policy_arn = format("arn:%s:iam::aws:policy/AmazonEKSBlockStoragePolicy", one(data.aws_partition.current[*].partition))
+  role       = one(aws_iam_role.default[*].name)
+}
+
+resource "aws_iam_role_policy_attachment" "amazon_eks_load_balancing_policy" {
+  count = local.create_eks_service_role && local.auto_mode_enabled ? 1 : 0
+
+  policy_arn = format("arn:%s:iam::aws:policy/AmazonEKSLoadBalancingPolicy", one(data.aws_partition.current[*].partition))
+  role       = one(aws_iam_role.default[*].name)
+}
+
+
+resource "aws_iam_role_policy_attachment" "amazon_eks_networking_policy" {
+  count = (local.create_eks_service_role && local.auto_mode_enabled) ? 1 : 0
+
+  policy_arn = format("arn:%s:iam::aws:policy/AmazonEKSNetworkingPolicy", one(data.aws_partition.current[*].partition))
   role       = one(aws_iam_role.default[*].name)
 }
 
@@ -87,4 +116,53 @@ resource "aws_iam_role_policy_attachment" "cluster_elb_service_role" {
 
   policy_arn = one(aws_iam_policy.cluster_elb_service_role[*].arn)
   role       = one(aws_iam_role.default[*].name)
+}
+
+
+
+################################################################################
+# EKS Auto Node IAM Role
+################################################################################
+# https://docs.aws.amazon.com/eks/latest/userguide/auto-create-node-role.html#id_check_for_an_existing_node_role
+
+locals {
+  create_node_iam_role = local.create_eks_service_role && local.auto_mode_enabled
+}
+
+data "aws_iam_policy_document" "node_assume_role_policy" {
+  count = local.create_eks_service_role ? 1 : 0
+
+  statement {
+    sid = "EKSAutoNodeAssumeRole"
+    actions = [
+      "sts:AssumeRole",
+      "sts:TagSession",
+    ]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "eks_node" {
+  count = local.create_eks_service_role ? 1 : 0
+
+  name        = "${module.label.id}-eks-auto-role"
+
+  assume_role_policy    = data.aws_iam_policy_document.node_assume_role_policy[0].json
+
+  tags                 = module.label.tags
+}
+
+# Policies attached ref https://docs.aws.amazon.com/eks/latest/userguide/service_IAM_role.html
+resource "aws_iam_role_policy_attachment" "eks_node" {
+  for_each = { for k, v in {
+    AmazonEKSWorkerNodeMinimalPolicy   = format("arn:%s:iam::aws:policy/AmazonEKSWorkerNodeMinimalPolicy", one(data.aws_partition.current[*].partition))
+    AmazonEC2ContainerRegistryPullOnly = format("arn:%s:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly", one(data.aws_partition.current[*].partition))
+  } : k => v if local.create_eks_service_role }
+
+  policy_arn = each.value
+  role       = aws_iam_role.eks_node[0].name
 }
