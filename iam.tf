@@ -86,7 +86,8 @@ data "aws_iam_policy_document" "cluster_elb_service_role" {
       "ec2:DescribeAddresses",
       "ec2:DescribeInternetGateways",
       "elasticloadbalancing:SetIpAddressType",
-      "elasticloadbalancing:SetSubnets"
+      "elasticloadbalancing:SetSubnets",
+      "elasticloadbalancing:RemoveTags",
     ]
     resources = ["*"]
   }
